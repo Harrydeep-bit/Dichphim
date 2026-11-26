@@ -1,0 +1,27 @@
+name: Build APK
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Giải nén mã nguồn (nếu tải lên dạng zip)
+        run: if [ -f DichPhim.zip ]; then unzip -o DichPhim.zip; fi
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+      - name: Đóng gói APK
+        run: |
+          if [ -d DichPhim/app ]; then cd DichPhim; fi
+          gradle assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/DichPhim.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DichPhim-apk
+          path: DichPhim.apk

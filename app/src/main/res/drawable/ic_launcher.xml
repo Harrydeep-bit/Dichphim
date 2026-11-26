@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- nền tròn -->
+    <path
+        android:fillColor="#E53935"
+        android:pathData="M54,4a50,50 0,1 1,0 100a50,50 0,1 1,0 -100z" />
+    <!-- màn hình phim -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M24,30h60a4,4 0,0 1,4 4v34a4,4 0,0 1,-4 4h-60a4,4 0,0 1,-4 -4v-34a4,4 0,0 1,4 -4z" />
+    <!-- dòng phụ đề -->
+    <path
+        android:fillColor="#E53935"
+        android:pathData="M32,56h44v5h-44z M38,64h32v4h-32z" />
+    <!-- nút play -->
+    <path
+        android:fillColor="#E53935"
+        android:pathData="M48,36l12,7l-12,7z" />
+    <!-- chân màn hình -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M44,76h20v6h-20z" />
+</vector>
