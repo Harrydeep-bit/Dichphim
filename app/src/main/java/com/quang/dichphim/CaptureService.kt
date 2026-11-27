@@ -59,10 +59,17 @@ class CaptureService : Service() {
     @Volatile private var backoffUntil = 0L
     @Volatile private var stopping = false
     private var heardAudio = false
+    @Volatile private var vision: Vision? = null
+    private var warnedBlack = false
 
     private val prefs by lazy { getSharedPreferences(MainActivity.PREFS, Context.MODE_PRIVATE) }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        vision?.onRotate()
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
@@ -104,6 +111,10 @@ class CaptureService : Service() {
         setupTts()
         if (!startCapture()) {
             stopSelf(); return START_NOT_STICKY
+        }
+        if (prefs.getBoolean(MainActivity.K_VISION, true)) {
+            val v = Vision(this, projection!!)
+            if (v.start()) vision = v
         }
         Bus.status("Đang nghe… Hãy mở Chrome và phát phim.")
         return START_NOT_STICKY
@@ -225,6 +236,7 @@ class CaptureService : Service() {
     /** Gom âm thanh, cắt ở chỗ ngắt câu (lặng ~0,3 giây) hoặc tối đa 8 giây. */
     private fun loop(rec: AudioRecord) {
         val frames = ArrayList<ShortArray>()
+        var startShot: ByteArray? = null
         var voiced = 0
         var quietRun = 0
         var silentFor = 0
@@ -254,6 +266,7 @@ class CaptureService : Service() {
             // Bỏ phần im lặng ở đầu
             if (frames.isEmpty() && !loud) continue
 
+            if (frames.isEmpty()) startShot = shot()
             frames.add(f)
             if (loud) { voiced++; quietRun = 0 } else quietRun++
 
@@ -265,11 +278,25 @@ class CaptureService : Service() {
             if (cut) {
                 if (voiced >= 4) {
                     val keep = frames.size - (quietRun - 2).coerceAtLeast(0)
-                    submit(merge(frames, keep))
+                    val endShot = shot()
+                    val shots = listOfNotNull(startShot, endShot.takeIf { it !== startShot })
+                    submit(merge(frames, keep), shots)
                 }
-                frames.clear(); voiced = 0; quietRun = 0
+                frames.clear(); voiced = 0; quietRun = 0; startShot = null
             }
         }
+    }
+
+    /** Chụp một khung hình nếu đang bật "cho AI xem hình". */
+    private fun shot(): ByteArray? {
+        val v = vision ?: return null
+        if (!prefs.getBoolean(MainActivity.K_VISION, true)) return null
+        val j = v.grab()
+        if (j == null && v.blackFrames >= 3 && !warnedBlack) {
+            warnedBlack = true
+            Bus.status("Web phim này chặn chụp hình (màn đen) — app chỉ dịch theo tiếng.")
+        }
+        return j
     }
 
     private fun merge(frames: List<ShortArray>, count: Int): ShortArray {
@@ -280,7 +307,7 @@ class CaptureService : Service() {
 
     // ---------------- Dịch ----------------
 
-    private fun submit(pcm: ShortArray) {
+    private fun submit(pcm: ShortArray, shots: List<ByteArray>) {
         if (pending.get() >= 2) {
             Bus.status("Mạng chậm — bỏ qua một đoạn để theo kịp phim.")
             return
@@ -288,14 +315,14 @@ class CaptureService : Service() {
         pending.incrementAndGet()
         try {
             worker.execute {
-                try { translate(pcm) } finally { pending.decrementAndGet() }
+                try { translate(pcm, shots) } finally { pending.decrementAndGet() }
             }
         } catch (_: Exception) {
             pending.decrementAndGet()
         }
     }
 
-    private fun translate(pcm: ShortArray) {
+    private fun translate(pcm: ShortArray, shots: List<ByteArray>) {
         if (!running) return
         val wait = backoffUntil - System.currentTimeMillis()
         if (wait > 0) {
@@ -306,7 +333,7 @@ class CaptureService : Service() {
         val model = prefs.getString(MainActivity.K_MODEL, MainActivity.DEFAULT_MODEL) ?: MainActivity.DEFAULT_MODEL
         val ctx = synchronized(recent) { recent.joinToString("\n") }
 
-        when (val r = Gemini.translate(key, model, Wav.encode(pcm, RATE), ctx, MainActivity.extraInstructions(prefs))) {
+        when (val r = Gemini.translate(key, model, Wav.encode(pcm, RATE), shots, ctx, MainActivity.extraInstructions(prefs))) {
             is Gemini.Res.Ok -> {
                 val text = r.text
                 if (text.isBlank() || text == "\"\"") return
@@ -354,6 +381,7 @@ class CaptureService : Service() {
         try { captureThread?.join(500) } catch (_: Exception) { }
         try { recorder?.release() } catch (_: Exception) { }
         recorder = null
+        vision?.stop(); vision = null
         try { projection?.stop() } catch (_: Exception) { }
         projection = null
         overlay?.remove(); overlay = null

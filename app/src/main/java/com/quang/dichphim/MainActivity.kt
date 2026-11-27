@@ -32,6 +32,7 @@ class MainActivity : Activity(), Bus.Listener {
         const val K_RATE = "rate"
         const val K_PRONOUN = "pronoun"
         const val K_NOTES = "notes"
+        const val K_VISION = "vision"
         const val DEFAULT_MODEL = "gemini-3.5-flash-lite"
         const val BETTER_MODEL = "gemini-3.6-flash"
         private const val REQ_CAPTURE = 10
@@ -68,6 +69,7 @@ class MainActivity : Activity(), Bus.Listener {
     private lateinit var modelEdit: EditText
     private lateinit var subBox: CheckBox
     private lateinit var speakBox: CheckBox
+    private lateinit var visionBox: CheckBox
     private lateinit var fontLabel: TextView
     private lateinit var rateLabel: TextView
     private lateinit var startBtn: Button
@@ -186,8 +188,14 @@ class MainActivity : Activity(), Bus.Listener {
             isChecked = prefs.getBoolean(K_SPEAK, true)
             setOnCheckedChangeListener { _, _ -> saveSettings() }
         }
+        visionBox = CheckBox(this).apply {
+            text = "Cho AI xem hình phim (xưng hô đúng hơn, tốn mạng hơn)"
+            isChecked = prefs.getBoolean(K_VISION, true)
+            setOnCheckedChangeListener { _, _ -> saveSettings() }
+        }
         settings.addView(subBox)
         settings.addView(speakBox)
+        settings.addView(visionBox)
 
         fontLabel = TextView(this)
         settings.addView(stepper(fontLabel,
@@ -282,6 +290,7 @@ class MainActivity : Activity(), Bus.Listener {
             .putString(K_MODEL, modelEdit.text.toString().trim().ifEmpty { DEFAULT_MODEL })
             .putBoolean(K_SUB, subBox.isChecked)
             .putBoolean(K_SPEAK, speakBox.isChecked)
+            .putBoolean(K_VISION, visionBox.isChecked)
             .putString(K_NOTES, notesEdit.text.toString().trim())
             .apply()
     }
@@ -428,7 +437,7 @@ MÁY XIAOMI / REDMI (quan trọng)
 • Cũng trong đó: Tiết kiệm pin → chọn "Không hạn chế". Bật "Tự khởi chạy".
 
 XƯNG HÔ SAI (VD "anh em" thành "mẹ con")?
-• AI chỉ nghe tiếng, không thấy hình, nên phải đoán quan hệ nhân vật.
+• Bật "Cho AI xem hình phim": app chụp 1–2 khung hình mỗi câu thoại để AI thấy ai đang nói. (Bật/tắt có hiệu lực từ lần bấm Bắt đầu sau. Hình làm tốn thêm dung lượng mạng, nên xem bằng Wi-Fi.)
 • Chọn kiểu xưng hô hợp với phim ở mục "Cách xưng hô".
 • Ghi vào "Ghi chú về phim" ai là gì của ai, VD: "A và B là hai anh em trai".
 • Bấm "Dịch hay hơn" để dùng mô hình AI giỏi hơn.

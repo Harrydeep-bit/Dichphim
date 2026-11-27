@@ -34,27 +34,39 @@ Quy tắc XƯNG HÔ (rất quan trọng, tiếng Việt khác tiếng Anh):
 
 Chỉ trả về JSON đúng dạng: {"lang": "tên ngôn ngữ gốc viết bằng tiếng Việt", "src": "lời gốc nghe được", "vi": "bản dịch tiếng Việt"}"""
 
+    private const val VISION = """
+
+HÌNH ẢNH: Kèm theo âm thanh là 1–2 ảnh chụp màn hình phim lúc câu thoại bắt đầu và kết thúc.
+- Dùng hình để biết AI ĐANG NÓI và NÓI VỚI AI: giới tính, tuổi tác (trẻ em, thanh niên, trung niên, người già), trang phục, bối cảnh (cổ trang, hiện đại, trường học, quân đội, gia đình...), rồi chọn xưng hô tiếng Việt cho đúng.
+- Người lớn tuổi nói với trẻ nhỏ có thể là ông/bà/bố/mẹ – con/cháu, nhưng chỉ dùng quan hệ gia đình khi hình và lời thoại cùng cho thấy rõ.
+- Nếu trên hình có phụ đề gốc (chữ nước ngoài) thì dùng nó để nghe chính xác hơn.
+- Dòng chữ TIẾNG VIỆT trên nền đen ở phía dưới là phụ đề của chính app dịch: BỎ QUA, không dịch lại.
+- Hình có thể đen hoặc mờ (web chặn chụp): khi đó chỉ dựa vào âm thanh."""
+
     /**
      * @param context các câu trước đó (lời gốc => bản dịch) để giữ mạch và xưng hô
      * @param extra yêu cầu thêm của người dùng: kiểu xưng hô, ghi chú về phim
      */
-    fun translate(apiKey: String, modelIn: String, wav: ByteArray, context: String, extra: String): Res {
+    fun translate(apiKey: String, modelIn: String, wav: ByteArray, shots: List<ByteArray>,
+                  context: String, extra: String): Res {
         val model = modelIn.trim().removePrefix("models/").ifEmpty { MainActivity.DEFAULT_MODEL }
         val tryThinking = model !in noThinking
-        var res = call(apiKey, model, wav, context, extra, withThinking = tryThinking)
+        var res = call(apiKey, model, wav, shots, context, extra, withThinking = tryThinking)
         // Mô hình không nhận tham số "suy nghĩ ít" -> nhớ lại và gửi không có nó.
         if (tryThinking && res is Res.Err && res.code == 400) {
             noThinking.add(model)
-            res = call(apiKey, model, wav, context, extra, withThinking = false)
+            res = call(apiKey, model, wav, shots, context, extra, withThinking = false)
         }
         return res
     }
 
     private val noThinking = java.util.Collections.synchronizedSet(HashSet<String>())
 
-    private fun call(apiKey: String, model: String, wav: ByteArray, context: String, extra: String,
+    private fun call(apiKey: String, model: String, wav: ByteArray, shots: List<ByteArray>,
+                     context: String, extra: String,
                      withThinking: Boolean): Res {
         val sb = StringBuilder(PROMPT)
+        if (shots.isNotEmpty()) sb.append(VISION)
         if (extra.isNotBlank()) {
             sb.append("\n\nYÊU CẦU CỦA NGƯỜI XEM (ưu tiên làm theo):\n").append(extra)
         }
@@ -69,6 +81,11 @@ Chỉ trả về JSON đúng dạng: {"lang": "tên ngôn ngữ gốc viết b�
             .put(JSONObject().put("inline_data", JSONObject()
                 .put("mime_type", "audio/wav")
                 .put("data", Base64.encodeToString(wav, Base64.NO_WRAP))))
+        for (img in shots) {
+            parts.put(JSONObject().put("inline_data", JSONObject()
+                .put("mime_type", "image/jpeg")
+                .put("data", Base64.encodeToString(img, Base64.NO_WRAP))))
+        }
 
         val gen = JSONObject()
             .put("temperature", 0.3)
