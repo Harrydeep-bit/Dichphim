@@ -306,13 +306,14 @@ class CaptureService : Service() {
         val model = prefs.getString(MainActivity.K_MODEL, MainActivity.DEFAULT_MODEL) ?: MainActivity.DEFAULT_MODEL
         val ctx = synchronized(recent) { recent.joinToString("\n") }
 
-        when (val r = Gemini.translate(key, model, Wav.encode(pcm, RATE), ctx)) {
+        when (val r = Gemini.translate(key, model, Wav.encode(pcm, RATE), ctx, MainActivity.extraInstructions(prefs))) {
             is Gemini.Res.Ok -> {
                 val text = r.text
                 if (text.isBlank() || text == "\"\"") return
                 synchronized(recent) {
-                    recent.addLast(text)
-                    while (recent.size > 4) recent.removeFirst()
+                    // Nhớ cả lời gốc lẫn bản dịch để AI giữ xưng hô nhất quán
+                    recent.addLast(if (r.src.isNotBlank()) "${r.src} => $text" else text)
+                    while (recent.size > 8) recent.removeFirst()
                 }
                 Bus.line(r.lang, text)
                 if (prefs.getBoolean(MainActivity.K_SUB, true) && Settings.canDrawOverlays(this)) {

@@ -30,10 +30,36 @@ class MainActivity : Activity(), Bus.Listener {
         const val K_SPEAK = "speak"
         const val K_FONT = "font"
         const val K_RATE = "rate"
+        const val K_PRONOUN = "pronoun"
+        const val K_NOTES = "notes"
         const val DEFAULT_MODEL = "gemini-3.5-flash-lite"
         const val BETTER_MODEL = "gemini-3.6-flash"
         private const val REQ_CAPTURE = 10
         private const val REQ_PERMS = 11
+
+        /** Tên hiển thị và yêu cầu gửi kèm cho AI, theo thứ tự trong danh sách chọn. */
+        val PRONOUN_STYLES = listOf(
+            "Tự động (AI nghe giọng để chọn)" to "",
+            "Trung tính: tôi – bạn" to
+                "Luôn xưng hô trung tính \"tôi – bạn\" (ngôi thứ ba: anh ấy / cô ấy / họ), trừ khi lời gốc gọi rõ quan hệ gia đình.",
+            "Anh – em" to
+                "Các nhân vật xưng hô \"anh – em\" với nhau (người lớn tuổi hơn hoặc nam là \"anh\"), trừ khi lời gốc gọi rõ quan hệ khác.",
+            "Cậu – tớ (bạn bè, học sinh)" to
+                "Các nhân vật là bạn bè cùng trang lứa, xưng hô \"cậu – tớ\" hoặc \"mình – cậu\".",
+            "Ta – ngươi (phim cổ trang, kiếm hiệp)" to
+                "Phim cổ trang: dùng lối xưng hô cổ như \"ta – ngươi\", \"huynh – đệ\", \"tỷ – muội\", \"sư phụ – đồ nhi\", \"bệ hạ\", \"thần\"... cho hợp ngữ cảnh."
+        )
+
+        fun extraInstructions(p: android.content.SharedPreferences): String {
+            val sb = StringBuilder()
+            val i = p.getInt(K_PRONOUN, 0).coerceIn(0, PRONOUN_STYLES.size - 1)
+            val rule = PRONOUN_STYLES[i].second
+            if (rule.isNotEmpty()) sb.append("- Xưng hô: ").append(rule).append('\n')
+            val notes = p.getString(K_NOTES, "")?.trim().orEmpty()
+            if (notes.isNotEmpty()) sb.append("- Thông tin về phim do người xem cung cấp (dùng để chọn xưng hô và dịch tên cho đúng): ")
+                .append(notes).append('\n')
+            return sb.toString()
+        }
     }
 
     private val prefs by lazy { getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
@@ -49,6 +75,7 @@ class MainActivity : Activity(), Bus.Listener {
     private lateinit var historyTv: TextView
     private lateinit var historyScroll: ScrollView
     private lateinit var guideTv: TextView
+    private lateinit var notesEdit: EditText
 
     private var waitingOverlay = false
 
@@ -113,6 +140,38 @@ class MainActivity : Activity(), Bus.Listener {
                 text = "Dịch hay hơn"; isAllCaps = false
                 setOnClickListener { modelEdit.setText(BETTER_MODEL); saveSettings() }
             }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        })
+
+        // Xưng hô
+        settings.addView(label("Cách xưng hô trong bản dịch"))
+        settings.addView(Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
+                PRONOUN_STYLES.map { it.first })
+            setSelection(prefs.getInt(K_PRONOUN, 0).coerceIn(0, PRONOUN_STYLES.size - 1))
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, pos: Int, id: Long) {
+                    prefs.edit().putInt(K_PRONOUN, pos).apply()
+                }
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
+            }
+        })
+
+        settings.addView(label("Ghi chú về phim (không bắt buộc)"))
+        notesEdit = EditText(this).apply {
+            hint = "VD: Phim Hàn. Minho và Jisu là hai anh em ruột, Minho là anh. Bà Kim là mẹ của họ."
+            setText(prefs.getString(K_NOTES, ""))
+            minLines = 2
+            maxLines = 5
+            textSize = 14f
+            gravity = Gravity.TOP or Gravity.START
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        }
+        settings.addView(notesEdit)
+        settings.addView(TextView(this).apply {
+            text = "Ghi rõ ai là gì của ai thì AI xưng hô đúng hơn nhiều. Đổi phim thì nhớ xoá ghi chú cũ."
+            textSize = 12f
+            setTextColor(Color.parseColor("#777777"))
         })
 
         // Chế độ
@@ -223,6 +282,7 @@ class MainActivity : Activity(), Bus.Listener {
             .putString(K_MODEL, modelEdit.text.toString().trim().ifEmpty { DEFAULT_MODEL })
             .putBoolean(K_SUB, subBox.isChecked)
             .putBoolean(K_SPEAK, speakBox.isChecked)
+            .putString(K_NOTES, notesEdit.text.toString().trim())
             .apply()
     }
 
@@ -366,6 +426,12 @@ App tự nhận ra mọi thứ tiếng (Anh, Trung, Hàn, Nhật, Thái, Pháp..
 MÁY XIAOMI / REDMI (quan trọng)
 • Cài đặt → Ứng dụng → Quản lý ứng dụng → Dịch Phim → Quyền khác → bật "Hiển thị cửa sổ bật lên khi chạy nền" và "Hiển thị trên ứng dụng khác".
 • Cũng trong đó: Tiết kiệm pin → chọn "Không hạn chế". Bật "Tự khởi chạy".
+
+XƯNG HÔ SAI (VD "anh em" thành "mẹ con")?
+• AI chỉ nghe tiếng, không thấy hình, nên phải đoán quan hệ nhân vật.
+• Chọn kiểu xưng hô hợp với phim ở mục "Cách xưng hô".
+• Ghi vào "Ghi chú về phim" ai là gì của ai, VD: "A và B là hai anh em trai".
+• Bấm "Dịch hay hơn" để dùng mô hình AI giỏi hơn.
 
 KHÔNG CÓ GIỌNG ĐỌC TIẾNG VIỆT?
 Cài "Dịch vụ giọng nói của Google" (Speech Services by Google) từ CH Play, rồi vào Cài đặt → Cài đặt bổ sung → Hỗ trợ tiếp cận → Chuyển văn bản thành giọng nói → chọn Google, ngôn ngữ Tiếng Việt.

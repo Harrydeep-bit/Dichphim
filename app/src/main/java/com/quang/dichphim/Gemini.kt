@@ -10,37 +10,59 @@ import java.net.URL
 object Gemini {
 
     sealed class Res {
-        data class Ok(val lang: String, val text: String) : Res()
+        /** src = lời gốc nghe được, text = bản dịch tiếng Việt */
+        data class Ok(val lang: String, val src: String, val text: String) : Res()
         data class Err(val code: Int, val msg: String, val retrySec: Int = 0) : Res()
     }
 
     private const val PROMPT = """Bạn là người dịch phụ đề phim chuyên nghiệp.
 Đoạn âm thanh đính kèm được cắt từ một bộ phim hoặc video đang phát (dài vài giây).
-Hãy nghe lời thoại — có thể là BẤT KỲ ngôn ngữ nào (Anh, Trung, Hàn, Nhật, Thái, Pháp, Tây Ban Nha, Đức, Nga, Ấn, Indonesia...) — rồi dịch sang tiếng Việt tự nhiên, ngắn gọn, đúng giọng nhân vật như phụ đề phim.
-Quy tắc:
+Hãy nghe lời thoại — có thể là BẤT KỲ ngôn ngữ nào (Anh, Trung, Hàn, Nhật, Thái, Pháp, Tây Ban Nha, Đức, Nga, Ấn, Indonesia...) — chép lại lời gốc, rồi dịch sang tiếng Việt tự nhiên, ngắn gọn như phụ đề phim.
+
+Quy tắc chung:
 - Nếu lời thoại đã là tiếng Việt thì chép lại nguyên văn.
-- Nếu không có lời nói rõ ràng (chỉ có nhạc, tiếng động, tiếng thở, im lặng) thì để "vi" là chuỗi rỗng.
+- Nếu không có lời nói rõ ràng (chỉ có nhạc, tiếng động, tiếng thở, im lặng) thì để "src" và "vi" là chuỗi rỗng.
 - Không giải thích, không thêm chú thích, không bịa những chỗ không nghe được.
 - Lời bài hát trong phim cũng dịch nếu nghe rõ.
-Chỉ trả về JSON đúng dạng: {"lang": "tên ngôn ngữ gốc viết bằng tiếng Việt", "vi": "bản dịch tiếng Việt"}"""
 
-    fun translate(apiKey: String, modelIn: String, wav: ByteArray, context: String): Res {
+Quy tắc XƯNG HÔ (rất quan trọng, tiếng Việt khác tiếng Anh):
+- Bạn KHÔNG nhìn thấy hình, nên KHÔNG được tự đặt ra quan hệ gia đình. Chỉ dùng mẹ/con, bố/con, ông/cháu, bà/cháu, vợ/chồng... khi lời gốc nói rõ (mom, mother, dad, son, daughter, grandma, wife, husband, 妈妈, 爸爸, 儿子, 엄마, 아빠, お母さん, お父さん...).
+- "brother/bro/哥/형/오빠/兄" = anh (anh trai, người anh em); "sister/sis/姐/누나/언니" = chị; "younger brother/弟弟/동생" = em.
+- Khi không chắc quan hệ: nghe giọng để đoán giới tính, dùng cách trung tính: "tôi – anh", "tôi – cô", "tôi – cậu", hoặc "tôi – bạn". Không đoán bừa tuổi tác.
+- Giữ NHẤT QUÁN cách xưng hô với các câu trước trong phần ngữ cảnh (nếu trước đã dùng "anh – em" giữa hai người thì tiếp tục như vậy).
+- Tên riêng giữ nguyên, không dịch.
+
+Chỉ trả về JSON đúng dạng: {"lang": "tên ngôn ngữ gốc viết bằng tiếng Việt", "src": "lời gốc nghe được", "vi": "bản dịch tiếng Việt"}"""
+
+    /**
+     * @param context các câu trước đó (lời gốc => bản dịch) để giữ mạch và xưng hô
+     * @param extra yêu cầu thêm của người dùng: kiểu xưng hô, ghi chú về phim
+     */
+    fun translate(apiKey: String, modelIn: String, wav: ByteArray, context: String, extra: String): Res {
         val model = modelIn.trim().removePrefix("models/").ifEmpty { MainActivity.DEFAULT_MODEL }
         val tryThinking = model !in noThinking
-        var res = call(apiKey, model, wav, context, withThinking = tryThinking)
+        var res = call(apiKey, model, wav, context, extra, withThinking = tryThinking)
         // Mô hình không nhận tham số "suy nghĩ ít" -> nhớ lại và gửi không có nó.
         if (tryThinking && res is Res.Err && res.code == 400) {
             noThinking.add(model)
-            res = call(apiKey, model, wav, context, withThinking = false)
+            res = call(apiKey, model, wav, context, extra, withThinking = false)
         }
         return res
     }
 
     private val noThinking = java.util.Collections.synchronizedSet(HashSet<String>())
 
-    private fun call(apiKey: String, model: String, wav: ByteArray, context: String, withThinking: Boolean): Res {
-        val prompt = if (context.isBlank()) PROMPT else
-            "$PROMPT\n\nNgữ cảnh — các câu phụ đề vừa hiện trước đó (chỉ để hiểu mạch phim, KHÔNG dịch lại):\n$context"
+    private fun call(apiKey: String, model: String, wav: ByteArray, context: String, extra: String,
+                     withThinking: Boolean): Res {
+        val sb = StringBuilder(PROMPT)
+        if (extra.isNotBlank()) {
+            sb.append("\n\nYÊU CẦU CỦA NGƯỜI XEM (ưu tiên làm theo):\n").append(extra)
+        }
+        if (context.isNotBlank()) {
+            sb.append("\n\nNgữ cảnh — các câu vừa nghe trước đó, dạng \"lời gốc => bản dịch\" ")
+                .append("(chỉ để hiểu mạch phim và giữ xưng hô, KHÔNG dịch lại):\n").append(context)
+        }
+        val prompt = sb.toString()
 
         val parts = JSONArray()
             .put(JSONObject().put("text", prompt))
@@ -94,10 +116,10 @@ Chỉ trả về JSON đúng dạng: {"lang": "tên ngôn ngữ gốc viết b�
 
     private fun parseOk(raw: String): Res {
         val root = JSONObject(raw)
-        val cands = root.optJSONArray("candidates") ?: return Res.Ok("", "")
-        if (cands.length() == 0) return Res.Ok("", "")
+        val cands = root.optJSONArray("candidates") ?: return Res.Ok("", "", "")
+        if (cands.length() == 0) return Res.Ok("", "", "")
         val parts = cands.getJSONObject(0).optJSONObject("content")?.optJSONArray("parts")
-            ?: return Res.Ok("", "")
+            ?: return Res.Ok("", "", "")
         val sb = StringBuilder()
         for (i in 0 until parts.length()) {
             val p = parts.getJSONObject(i)
@@ -110,10 +132,10 @@ Chỉ trả về JSON đúng dạng: {"lang": "tên ngôn ngữ gốc viết b�
         }
         return try {
             val j = JSONObject(t)
-            Res.Ok(j.optString("lang", "").trim(), j.optString("vi", "").trim())
+            Res.Ok(j.optString("lang", "").trim(), j.optString("src", "").trim(), j.optString("vi", "").trim())
         } catch (e: Exception) {
             // Mô hình không trả JSON -> dùng nguyên văn
-            Res.Ok("", t)
+            Res.Ok("", "", t)
         }
     }
 
